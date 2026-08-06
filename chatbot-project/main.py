@@ -18,11 +18,11 @@ FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "YOUR_PAGE_TOKEN")
 VERIFY_TOKEN = os.getenv("FB_VERIFY_TOKEN", "my_custom_secret_token")
 
 # Initialize Groq Client & Local Embedding
+# Initialize Groq Client & Lightweight Embedding
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
-)
+# heavy sentence-transformers এর বদলে ChromaDB-এর ডিফল্ট হালকা এমবেডিং ব্যবহার
+embedding_func = embedding_functions.DefaultEmbeddingFunction()
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(
