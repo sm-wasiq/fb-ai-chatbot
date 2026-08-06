@@ -26,7 +26,7 @@ embedding_func = embedding_functions.DefaultEmbeddingFunction()
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(
-    name="business_kb",
+    name="business_kb_v2",
     embedding_function=embedding_func
 )
 

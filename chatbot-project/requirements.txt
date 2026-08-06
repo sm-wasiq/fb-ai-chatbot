@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 groq
-chromadb
 python-dotenv
 requests
 pydantic
