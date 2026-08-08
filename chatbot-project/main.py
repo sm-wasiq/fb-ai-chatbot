@@ -1,136 +1,119 @@
 import os
 import json
-import chromadb
 import requests
-from fastapi import FastAPI, HTTPException, Request, Response, BackgroundTasks
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from chromadb.utils import embedding_functions
+from fastapi import FastAPI, Request, Response
 from groq import Groq
 
-load_dotenv()
+app = FastAPI()
 
-app = FastAPI(title="Production Ready AI Support Engine")
+# Groq Client Initialization
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Environment Variables
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "YOUR_PAGE_TOKEN")
-VERIFY_TOKEN = os.getenv("FB_VERIFY_TOKEN", "my_custom_secret_token")
-
-# Initialize Groq Client & Local Embedding
-# Initialize Groq Client & Lightweight Embedding
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-# heavy sentence-transformers এর বদলে ChromaDB-এর ডিফল্ট হালকা এমবেডিং ব্যবহার
-embedding_func = embedding_functions.DefaultEmbeddingFunction()
-
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
-collection = chroma_client.get_or_create_collection(
-    name="business_kb_v2",
-    embedding_function=embedding_func
-)
-
-# Knowledge Base Synchronization on Server Start
-@app.on_event("startup")
-def startup_event():
-    if os.path.exists("knowledge_base.json"):
-        with open("knowledge_base.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        documents, metadatas, ids = [], [], []
-        for idx, item in enumerate(data):
-            doc_text = f"প্রশ্ন: {item['question']} উত্তর: {item['answer']}"
-            documents.append(doc_text)
-            metadatas.append({"answer": item['answer']})
-            ids.append(f"id_{idx}")
-
-        collection.upsert(documents=documents, metadatas=metadatas, ids=ids)
-        print("✅ Production Vector Knowledge Base synchronized successfully!")
-
-# Core Intelligence Function with Semantic Cache
-def get_ai_response(user_query: str) -> str:
-    # 1. High Precision Vector Search
-    results = collection.query(query_texts=[user_query], n_results=1)
-    
-    # Cache hit logic based on distance similarity threshold
-    if results['distances'] and len(results['distances'][0]) > 0:
-        distance = results['distances'][0][0]
-        # Very close query matches return cached answers instantly (0 latency)
-        if distance < 0.25:
-            print("[CACHE HIT] Direct Answer Served")
-            return results['metadatas'][0][0]['answer']
-
-    retrieved_context = ""
-    if results['documents'] and len(results['documents'][0]) > 0:
-        retrieved_context = results['documents'][0][0]
-
-    # 2. Strict Prompt Instruction to avoid Hallucinations
-    system_prompt = f"""
-    You are a professional, helpful customer service assistant for a business in Bangladesh.
-    Strictly use the provided Context to answer the customer query accurately in natural Bangla or Banglish.
-    If the context does not contain the answer, politely ask them to leave a phone number for human support.
-    Do not invent fake prices, terms, or contact information.
-
-    Context:
-    {retrieved_context}
-    """
-
-    response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_query}
-        ],
-        temperature=0.1
-    )
-
-    return response.choices[0].message.content
-
-# Outbound Message Handler to Messenger Graph API
-def send_fb_message(recipient_id: str, text: str):
-    url = f"https://graph.facebook.com/v19.0/me/messages?access_token={FB_PAGE_ACCESS_TOKEN}"
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": {"text": text}
-    }
-    headers = {"Content-Type": "application/json"}
+# Load Knowledge Base JSON File
+def load_knowledge_base():
     try:
-        requests.post(url, json=payload, headers=headers, timeout=5)
+        # chatbot-project ফোল্ডারের ভেতর ফাইল থাকলে পাথ অনুযায়ী রিড করবে
+        file_path = "knowledge_base.json"
+        if not os.path.exists(file_path):
+            file_path = "chatbot-project/knowledge_base.json"
+            
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception as e:
-        print(f"Failed to deliver message via FB Graph API: {e}")
+        print(f"Error loading knowledge base: {e}")
+        return {}
 
-# Async Background Processor for Messenger Requests
-def process_messenger_event(sender_id: str, user_text: str):
-    bot_reply = get_ai_response(user_text)
-    send_fb_message(sender_id, bot_reply)
+KNOWLEDGE_BASE = load_knowledge_base()
 
-# ----------------- ENDPOINTS -----------------
+# Point-to-Point System Prompt Generator
+def get_system_prompt(page_id: str):
+    shop = KNOWLEDGE_BASE.get(page_id, {
+        "shop_name": "আমাদের শপ",
+        "location": "অনলাইন সার্ভিস",
+        "delivery_charge": "ঢাকার ভেতরে ৮০ টাকা, বাইরে ১৫০ টাকা।",
+        "payment_method": "ক্যাশ অন ডেলিভারি।",
+        "return_policy": "প্রোডাক্টে সমস্যা থাকলে ৩ দিনের মধ্যে জানান।"
+    })
 
+    return f"""
+তুমি "{shop.get('shop_name')}"-এর একজন প্রফেশনাল এবং পয়েন্ট-টু-পয়েন্ট কাস্টমার সাপোর্ট এজেন্ট।
+
+[KNOWLEDGE BASE]
+- শপের নাম: {shop.get('shop_name')}
+- লোকেশন: {shop.get('location')}
+- ডেলিভারি চার্জ: {shop.get('delivery_charge')}
+- পেমেন্ট পদ্ধতি: {shop.get('payment_method')}
+- রিটার্ন পলিসি: {shop.get('return_policy')}
+
+[STRICT RULES FOR REPLYING]
+১. কাস্টমার ঠিক যতটুকু জানতে চেয়েছে, ঠিক ততটুকুর উত্তর ১ থেকে ২ লাইনে পয়েন্ট আকারে দেবে।
+২. অপ্রাসঙ্গিক তথ্য দেওয়া সম্পূর্ণ নিষেধ (যেমন: ডেলিভারি চার্জ জানতে চাইলে লোকেশন বা পেমেন্ট নিয়ে কিছু বলবে না)।
+৩. নলেজ বেসে উত্তর থাকলে ভুলেও "হিউম্যান সাপোর্টে যোগাযোগ করুন" জাতীয় কথা বলবে না। সরাসরি সঠিক তথ্য জানিয়ে দেবে।
+৪. কোনো অতিরিক্ত ভূমিকা বা ভূমিকা-মূলক বাক্য (যেমন: "আমাদের শপের লোকেশন হলো...", "আমি আপনাকে জানাতে পারি যে...") লেখা যাবে না।
+৫. উত্তর সবসময় পয়েন্ট আকারে অথবা খুব সংক্ষেপে সহজ বাংলায় দেবে।
+"""
+
+# Webhook Verification
 @app.get("/webhook")
 async def verify_webhook(request: Request):
-    """Facebook Webhook Authentication Verification Endpoint"""
     params = request.query_params
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
 
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return Response(content=challenge, status_code=200)
-    return Response(status_code=403)
+    if mode and token:
+        if mode == "subscribe" and token == os.getenv("VERIFY_TOKEN"):
+            return Response(content=challenge, status_code=200)
+        return Response(content="Verification failed", status_code=403)
+    return Response(content="Bad Request", status_code=400)
 
+# Webhook Event Handling
 @app.post("/webhook")
-async def handle_messenger_payload(request: Request, background_tasks: BackgroundTasks):
-    """Event Receiver for Facebook Messenger Events"""
+async def handle_webhook(request: Request):
     data = await request.json()
 
     if data.get("object") == "page":
         for entry in data.get("entry", []):
+            page_id = str(entry.get("id"))
             for messaging_event in entry.get("messaging", []):
-                sender_id = messaging_event.get("sender", {}).get("id")
-                
-                if messaging_event.get("message") and "text" in messaging_event["message"]:
-                    user_text = messaging_event["message"]["text"]
-                    # Offload response generation to background task to respond to Facebook instantly (<1s)
-                    background_tasks.add_task(process_messenger_event, sender_id, user_text)
+                if "message" in messaging_event and "text" in messaging_event["message"]:
+                    sender_id = messaging_event["sender"]["id"]
+                    user_message = messaging_event["message"]["text"]
 
-    return Response(content="EVENT_RECEIVED", status_code=200)
+                    # 1. Generate System Prompt according to Page ID
+                    system_prompt = get_system_prompt(page_id)
+
+                    # 2. Call Groq API
+                    chat_completion = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message}
+                        ],
+                        model="llama3-8b-8192"
+                    )
+
+                    bot_reply = chat_completion.choices[0].message.content
+
+                    # 3. Send Reply to Messenger
+                    send_message(sender_id, bot_reply, page_id)
+
+        return Response(content="EVENT_RECEIVED", status_code=200)
+    return Response(content="Not Found", status_code=404)
+
+# Function to Send Message back to Meta Messenger
+def send_message(recipient_id: str, message_text: str, page_id: str):
+    # Dynamic Token Selection based on Page ID from .env
+    access_token = os.getenv(f"PAGE_TOKEN_{page_id}")
+    
+    if not access_token:
+        access_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
+
+    url = f"https://graph.facebook.com/v20.0/me/messages?access_token={access_token}"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": message_text}
+    }
+    headers = {"Content-Type": "application/json"}
+
+    response = requests.post(url, json=payload, headers=headers)
+    print(f"Message sent to {recipient_id}, status: {response.status_code}")
