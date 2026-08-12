@@ -67,6 +67,9 @@ async def verify_webhook(request: Request):
         return Response(content="Verification failed", status_code=403)
     return Response(content="Bad Request", status_code=400)
 
+# Message deduplication cache
+PROCESSED_MESSAGES = set()
+
 # Webhook Event Handling
 @app.post("/webhook")
 async def handle_webhook(request: Request):
@@ -76,27 +79,41 @@ async def handle_webhook(request: Request):
         for entry in data.get("entry", []):
             page_id = str(entry.get("id"))
             for messaging_event in entry.get("messaging", []):
-                if "message" in messaging_event and "text" in messaging_event["message"]:
-                    sender_id = messaging_event["sender"]["id"]
-                    user_message = messaging_event["message"]["text"]
+                message = messaging_event.get("message")
+                if message:
+                    # 1. Ignore echo messages sent by the page/bot itself
+                    if message.get("is_echo"):
+                        continue
 
-                    # 1. Generate System Prompt according to Page ID
-                    system_prompt = get_system_prompt(page_id)
+                    # 2. Ignore duplicate message retries from Meta
+                    mid = message.get("mid")
+                    if mid:
+                        if mid in PROCESSED_MESSAGES:
+                            continue
+                        PROCESSED_MESSAGES.add(mid)
+                        if len(PROCESSED_MESSAGES) > 1000:
+                            PROCESSED_MESSAGES.clear()
 
-                    # 2. Call Groq API
-                    chat_completion = client.chat.completions.create(
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_message}
-                        ],
-                        # নতুন কোড:
-model="llama-3.1-8b-instant"
-                    )
+                    if "text" in message:
+                        sender_id = messaging_event["sender"]["id"]
+                        user_message = message["text"]
 
-                    bot_reply = chat_completion.choices[0].message.content
+                        # 1. Generate System Prompt according to Page ID
+                        system_prompt = get_system_prompt(page_id)
 
-                    # 3. Send Reply to Messenger
-                    send_message(sender_id, bot_reply, page_id)
+                        # 2. Call Groq API
+                        chat_completion = client.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message}
+                            ],
+                            model="llama-3.1-8b-instant"
+                        )
+
+                        bot_reply = chat_completion.choices[0].message.content
+
+                        # 3. Send Reply to Messenger
+                        send_message(sender_id, bot_reply, page_id)
 
         return Response(content="EVENT_RECEIVED", status_code=200)
     return Response(content="Not Found", status_code=404)
