@@ -78,6 +78,7 @@ PROCESSED_MESSAGES = set()
 @app.post("/webhook")
 async def handle_webhook(request: Request):
     data = await request.json()
+    print(f"DEBUG: Webhook payload received: {data}")
 
     if data.get("object") == "page":
         for entry in data.get("entry", []):
@@ -87,12 +88,14 @@ async def handle_webhook(request: Request):
                 if message:
                     # 1. Ignore echo messages sent by the page/bot itself
                     if message.get("is_echo"):
+                        print(f"DEBUG: Ignoring echo message: {message.get('mid')}")
                         continue
 
                     # 2. Ignore duplicate message retries from Meta
                     mid = message.get("mid")
                     if mid:
                         if mid in PROCESSED_MESSAGES:
+                            print(f"DEBUG: Ignoring duplicate mid: {mid}")
                             continue
                         PROCESSED_MESSAGES.add(mid)
                         if len(PROCESSED_MESSAGES) > 1000:
@@ -101,6 +104,7 @@ async def handle_webhook(request: Request):
                     if "text" in message:
                         sender_id = messaging_event["sender"]["id"]
                         user_message = message["text"]
+                        print(f"DEBUG: Received message '{user_message}' from sender {sender_id} for page {page_id}")
 
                         try:
                             # 1. Generate System Prompt according to Page ID
@@ -116,11 +120,12 @@ async def handle_webhook(request: Request):
                             )
 
                             bot_reply = chat_completion.choices[0].message.content
+                            print(f"DEBUG: Groq reply generated: '{bot_reply}'")
 
                             # 3. Send Reply to Messenger
                             send_message(sender_id, bot_reply, page_id)
                         except Exception as e:
-                            print(f"Error processing message or calling Groq API: {e}")
+                            print(f"ERROR: Exception while processing message: {e}")
 
         return Response(content="EVENT_RECEIVED", status_code=200)
     return Response(content="Not Found", status_code=404)
@@ -133,6 +138,9 @@ def send_message(recipient_id: str, message_text: str, page_id: str):
     if not access_token:
         access_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
 
+    if not access_token:
+        print(f"ERROR: No Page Access Token found for Page ID {page_id} or FB_PAGE_ACCESS_TOKEN!")
+
     url = f"https://graph.facebook.com/v20.0/me/messages?access_token={access_token}"
     payload = {
         "recipient": {"id": recipient_id},
@@ -141,4 +149,4 @@ def send_message(recipient_id: str, message_text: str, page_id: str):
     headers = {"Content-Type": "application/json"}
 
     response = requests.post(url, json=payload, headers=headers)
-    print(f"Message sent to {recipient_id}, status: {response.status_code}")
+    print(f"DEBUG: Send message to {recipient_id}, status: {response.status_code}, response: {response.text}")
