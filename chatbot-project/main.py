@@ -2,8 +2,7 @@ import os
 import json
 import requests
 from fastapi import FastAPI, Request, Response
-from groq import Groq
-from dotenv import load_dotenv
+from groq import Groq, RateLimitError
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -124,6 +123,10 @@ async def handle_webhook(request: Request):
 
                             # 3. Send Reply to Messenger
                             send_message(sender_id, bot_reply, page_id)
+                        except RateLimitError as e:
+                            print(f"ERROR: Groq Rate limit reached: {e}")
+                            fallback_reply = "ধন্যবাদ মেসেজ করার জন্য! বর্তমানে অনেক কাস্টমারের ইনকোয়ারি থাকায় সামান্য বিলম্ব হচ্ছে, অনুগ্রহ করে ১ মিনিট পর আবার চেষ্টা করুন।"
+                            send_message(sender_id, fallback_reply, page_id)
                         except Exception as e:
                             print(f"ERROR: Exception while processing message: {e}")
 
