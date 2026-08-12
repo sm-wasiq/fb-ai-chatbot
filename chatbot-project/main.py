@@ -3,6 +3,10 @@ import json
 import requests
 from fastapi import FastAPI, Request, Response
 from groq import Groq
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 app = FastAPI()
 
@@ -98,22 +102,25 @@ async def handle_webhook(request: Request):
                         sender_id = messaging_event["sender"]["id"]
                         user_message = message["text"]
 
-                        # 1. Generate System Prompt according to Page ID
-                        system_prompt = get_system_prompt(page_id)
+                        try:
+                            # 1. Generate System Prompt according to Page ID
+                            system_prompt = get_system_prompt(page_id)
 
-                        # 2. Call Groq API
-                        chat_completion = client.chat.completions.create(
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_message}
-                            ],
-                            model="llama-3.1-8b-instant"
-                        )
+                            # 2. Call Groq API
+                            chat_completion = client.chat.completions.create(
+                                messages=[
+                                    {"role": "system", "content": system_prompt},
+                                    {"role": "user", "content": user_message}
+                                ],
+                                model="llama-3.1-8b-instant"
+                            )
 
-                        bot_reply = chat_completion.choices[0].message.content
+                            bot_reply = chat_completion.choices[0].message.content
 
-                        # 3. Send Reply to Messenger
-                        send_message(sender_id, bot_reply, page_id)
+                            # 3. Send Reply to Messenger
+                            send_message(sender_id, bot_reply, page_id)
+                        except Exception as e:
+                            print(f"Error processing message or calling Groq API: {e}")
 
         return Response(content="EVENT_RECEIVED", status_code=200)
     return Response(content="Not Found", status_code=404)
