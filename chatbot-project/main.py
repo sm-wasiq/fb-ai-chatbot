@@ -5,6 +5,8 @@ from fastapi import FastAPI, Request, Response
 from groq import Groq, RateLimitError
 
 # Load environment variables from .env file if present
+from dotenv import load_dotenv
+
 load_dotenv()
 
 app = FastAPI()
