@@ -57,6 +57,40 @@ def get_system_prompt(page_id: str):
 ৫. উত্তর সবসময় পয়েন্ট আকারে অথবা খুব সংক্ষেপে সহজ বাংলায় দেবে।
 """
 
+# Model Configuration from Environment
+PRIMARY_MODEL = os.getenv("GROQ_MODEL", "groq/compound-mini")
+FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3.6-27b")
+
+def generate_ai_reply(system_prompt: str, user_message: str) -> str:
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+    # 1. Try Primary Model
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=messages,
+            model=PRIMARY_MODEL,
+        )
+        return chat_completion.choices[0].message.content
+    except Exception as primary_err:
+        print(f"WARNING: Primary model ({PRIMARY_MODEL}) failed: {primary_err}")
+        
+        # 2. Try Fallback Backup Model if configured
+        if FALLBACK_MODEL and FALLBACK_MODEL != PRIMARY_MODEL:
+            try:
+                print(f"DEBUG: Retrying with fallback model ({FALLBACK_MODEL})...")
+                chat_completion = client.chat.completions.create(
+                    messages=messages,
+                    model=FALLBACK_MODEL,
+                )
+                return chat_completion.choices[0].message.content
+            except Exception as fallback_err:
+                print(f"ERROR: Fallback model ({FALLBACK_MODEL}) also failed: {fallback_err}")
+        
+        # Raise original exception if all models fail
+        raise primary_err
+
 # Webhook Verification
 @app.get("/webhook")
 async def verify_webhook(request: Request):
@@ -110,16 +144,8 @@ async def handle_webhook(request: Request):
                             # 1. Generate System Prompt according to Page ID
                             system_prompt = get_system_prompt(page_id)
 
-                            # 2. Call Groq API
-                            chat_completion = client.chat.completions.create(
-                                messages=[
-                                    {"role": "system", "content": system_prompt},
-                                    {"role": "user", "content": user_message}
-                                ],
-                                model="groq/compound-mini",
-                            )
-
-                            bot_reply = chat_completion.choices[0].message.content
+                            # 2. Generate Reply using Groq (Primary or Backup)
+                            bot_reply = generate_ai_reply(system_prompt, user_message)
                             print(f"DEBUG: Groq reply generated: '{bot_reply}'")
 
                             # 3. Send Reply to Messenger
@@ -130,6 +156,8 @@ async def handle_webhook(request: Request):
                             send_message(sender_id, fallback_reply, page_id)
                         except Exception as e:
                             print(f"ERROR: Exception while processing message: {e}")
+                            emergency_reply = "ধন্যবাদ আপনার বার্তার জন্য! আমাদের একজন প্রতিনিধি খুব শীঘ্রই আপনার সাথে যোগাযোগ করবেন।"
+                            send_message(sender_id, emergency_reply, page_id)
 
         return Response(content="EVENT_RECEIVED", status_code=200)
     return Response(content="Not Found", status_code=404)
