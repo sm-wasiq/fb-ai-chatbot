@@ -116,7 +116,7 @@ async def handle_webhook(request: Request):
                                     {"role": "system", "content": system_prompt},
                                     {"role": "user", "content": user_message}
                                 ],
-                                model="llama-3.1-8b-instant",
+                                model="groq/compound-mini",
                             )
 
                             bot_reply = chat_completion.choices[0].message.content
