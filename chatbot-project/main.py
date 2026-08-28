@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import requests
 from fastapi import FastAPI, Request, Response
@@ -16,7 +17,6 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 # Load Knowledge Base JSON File
 def load_knowledge_base():
     try:
-        # chatbot-project ফোল্ডারের ভেতর ফাইল থাকলে পাথ অনুযায়ী রিড করবে
         file_path = "knowledge_base.json"
         if not os.path.exists(file_path):
             file_path = "chatbot-project/knowledge_base.json"
@@ -29,37 +29,55 @@ def load_knowledge_base():
 
 KNOWLEDGE_BASE = load_knowledge_base()
 
-# Point-to-Point System Prompt Generator
+# Point-to-Point High Conversion System Prompt Generator
 def get_system_prompt(page_id: str):
     shop = KNOWLEDGE_BASE.get(page_id, {
-        "shop_name": "আমাদের শপ",
-        "location": "অনলাইন সার্ভিস",
-        "delivery_charge": "ঢাকার ভেতরে ৮০ টাকা, বাইরে ১৫০ টাকা।",
-        "payment_method": "ক্যাশ অন ডেলিভারি।",
-        "return_policy": "প্রোডাক্টে সমস্যা থাকলে ৩ দিনের মধ্যে জানান।"
+        "shop_name": "Zoré Fashion",
+        "location": "মিরপুর ১, ঢাকা (ডিসপ্লে সেন্টার রয়েছে)। সারা বাংলাদেশে হোম ডেলিভারি দেওয়া হয়।",
+        "delivery_charge": "ঢাকার ভেতরে ৮০ টাকা (১-২ কার্যদিবস), ঢাকার বাইরে ১২০ টাকা (২-৩ কার্যদিবস)।",
+        "payment_method": "ক্যাশ অন ডেলিভারি (পণ্য হাতে পেয়ে পেমেন্ট সুবিধা) এবং বিকাশ/নগদ প্রযোজ্য।",
+        "size_guide": "M (বুক ৩৮ ইঞ্চি), L (বুক ৪০ ইঞ্চি), XL (বুক ৪২ ইঞ্চি), XXL (বুক ৪৪ ইঞ্চি) এভেইলেবল রয়েছে।",
+        "return_exchange": "ডেলিভারি ম্যানের সামনে চেক করে নেওয়ার সুবিধা আছে। এছাড়া ৩ দিনের মধ্যে সাইজ এক্সচেঞ্জ পলিসি রয়েছে।",
+        "order_process": "অর্ডার কনফার্ম করতে প্রোডাক্টের ছবি বা সাইজ, আপনার নাম, পূর্ণাঙ্গ ঠিকানা এবং মোবাইল নম্বর ইনবক্সে পাঠিয়ে দিন।"
     })
 
     return f"""
-তুমি "{shop.get('shop_name')}"-এর একজন প্রফেশনাল এবং পয়েন্ট-টু-পয়েন্ট কাস্টমার সাপোর্ট এজেন্ট।
+You are the official AI sales & customer support representative for "{shop.get('shop_name')}".
+Your objective is to answer questions accurately and convert prospects into happy buyers with polite, friendly, and helpful responses.
 
 [KNOWLEDGE BASE]
-- শপের নাম: {shop.get('shop_name')}
-- লোকেশন: {shop.get('location')}
-- ডেলিভারি চার্জ: {shop.get('delivery_charge')}
-- পেমেন্ট পদ্ধতি: {shop.get('payment_method')}
-- রিটার্ন পলিসি: {shop.get('return_policy')}
+- Shop Name: {shop.get('shop_name')}
+- Location / Outlet: {shop.get('location')}
+- Delivery Charge & Delivery Time: {shop.get('delivery_charge')}
+- Payment Methods: {shop.get('payment_method')}
+- Available Sizes & Measurements: {shop.get('size_guide')}
+- Return & Exchange Policy: {shop.get('return_exchange')}
+- How to Order / Customer Conversion: {shop.get('order_process')}
 
-[STRICT RULES FOR REPLYING]
-১. কাস্টমার ঠিক যতটুকু জানতে চেয়েছে, ঠিক ততটুকুর উত্তর ১ থেকে ২ লাইনে পয়েন্ট আকারে দেবে।
-২. অপ্রাসঙ্গিক তথ্য দেওয়া সম্পূর্ণ নিষেধ (যেমন: ডেলিভারি চার্জ জানতে চাইলে লোকেশন বা পেমেন্ট নিয়ে কিছু বলবে না)।
-৩. নলেজ বেসে উত্তর থাকলে ভুলেও "হিউম্যান সাপোর্টে যোগাযোগ করুন" জাতীয় কথা বলবে না। সরাসরি সঠিক তথ্য জানিয়ে দেবে।
-৪. কোনো অতিরিক্ত ভূমিকা বা ভূমিকা-মূলক বাক্য (যেমন: "আমাদের শপের লোকেশন হলো...", "আমি আপনাকে জানাতে পারি যে...") লেখা যাবে না।
-৫. উত্তর সবসময় পয়েন্ট আকারে অথবা খুব সংক্ষেপে সহজ বাংলায় দেবে।
+[RULES FOR RESPONDING]
+1. Language Handling:
+   - English input (e.g. "Do you have size L available? What is the chest size?"): Reply in fluent, polite English. Example: "Yes! Size L is available with a 40-inch chest measurement. To place an order, please send us your name, address, and phone number here."
+   - Bangla or Banglish input (e.g. "order kivabe korbo?", "size L ache?"): Reply in polite, natural, conversational Bengali (বাংলা).
+2. High-Conversion Friendly Tone:
+   - Always confirm product/size availability positively according to the size guide.
+   - When asked how to order or showing buying intent, clearly guide them to drop their Name, Delivery Address, Phone Number, and desired size/product right here in the chat, or reach out via call/WhatsApp.
+3. Keep answers concise, clear, and direct (1-3 sentences maximum).
+4. Do NOT prefix sentences with bullet dashes or hyphens (`- `). Write natural conversational text.
+5. Never state that size or store information is missing when it is listed in the knowledge base.
 """
 
 # Model Configuration from Environment
 PRIMARY_MODEL = os.getenv("GROQ_MODEL", "groq/compound-mini")
-FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3.6-27b")
+FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3.8-27b")
+
+def clean_reply_text(text: str) -> str:
+    if not text:
+        return ""
+    # Strip <think>...</think> reasoning blocks from Qwen / reasoning models
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Strip any leading hyphens or bullet asterisks from lines if present
+    lines = [re.sub(r"^[-*•\s]+\s*", "", line).strip() for line in text.split("\n") if line.strip()]
+    return " ".join(lines).strip()
 
 def generate_ai_reply(system_prompt: str, user_message: str) -> str:
     messages = [
@@ -72,7 +90,8 @@ def generate_ai_reply(system_prompt: str, user_message: str) -> str:
             messages=messages,
             model=PRIMARY_MODEL,
         )
-        return chat_completion.choices[0].message.content
+        raw_reply = chat_completion.choices[0].message.content
+        return clean_reply_text(raw_reply)
     except Exception as primary_err:
         print(f"WARNING: Primary model ({PRIMARY_MODEL}) failed: {primary_err}")
         
@@ -84,7 +103,8 @@ def generate_ai_reply(system_prompt: str, user_message: str) -> str:
                     messages=messages,
                     model=FALLBACK_MODEL,
                 )
-                return chat_completion.choices[0].message.content
+                raw_reply = chat_completion.choices[0].message.content
+                return clean_reply_text(raw_reply)
             except Exception as fallback_err:
                 print(f"ERROR: Fallback model ({FALLBACK_MODEL}) also failed: {fallback_err}")
         
