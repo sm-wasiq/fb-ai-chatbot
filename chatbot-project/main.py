@@ -3,7 +3,9 @@ import json
 import requests
 from fastapi import FastAPI, Request, Response
 from groq import Groq, RateLimitError
-
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY"),
+)
 # Load environment variables from .env file if present
 from dotenv import load_dotenv
 
